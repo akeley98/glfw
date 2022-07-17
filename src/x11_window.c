@@ -31,6 +31,9 @@
 
 #include <X11/cursorfont.h>
 #include <X11/Xmd.h>
+#include <X11/extensions/XKB.h>
+#include <X11/XKBlib.h>
+#include <X11/extensions/XKBgeom.h>
 
 #include <poll.h>
 
@@ -210,26 +213,34 @@ static Bool isSelPropNewValueNotify(Display* display, XEvent* event, XPointer po
            event->xproperty.atom == notification->xselection.property;
 }
 
-// Translates an X event modifier state mask
+// Polls the X11 display for up-to-date modifier key state and
+// translate to GLFW modifier state mask.
 //
-static int translateState(int state)
+// NB: we use this instead of the X event modifier state mask due to a
+// platform quirk: modifier key press/release events don't reflect their
+// own state change (e.g. pressing left control generates a KeyPress event
+// WITHOUT the ctrl state bit set). https://github.com/glfw/glfw/issues/1630
+static int getMods(Display* display)
 {
-    int mods = 0;
+    int glfw_mods = 0;
+    XkbStateRec record;
 
-    if (state & ShiftMask)
-        mods |= GLFW_MOD_SHIFT;
-    if (state & ControlMask)
-        mods |= GLFW_MOD_CONTROL;
-    if (state & Mod1Mask)
-        mods |= GLFW_MOD_ALT;
-    if (state & Mod4Mask)
-        mods |= GLFW_MOD_SUPER;
-    if (state & LockMask)
-        mods |= GLFW_MOD_CAPS_LOCK;
-    if (state & Mod2Mask)
-        mods |= GLFW_MOD_NUM_LOCK;
+    XkbGetState(display, XkbUseCoreKbd, &record);
 
-    return mods;
+    if (record.mods & ShiftMask)
+        glfw_mods |= GLFW_MOD_SHIFT;
+    if (record.mods & ControlMask)
+        glfw_mods |= GLFW_MOD_CONTROL;
+    if (record.mods & Mod1Mask)
+        glfw_mods |= GLFW_MOD_ALT;
+    if (record.mods & Mod4Mask)
+        glfw_mods |= GLFW_MOD_SUPER;
+    if (record.mods & LockMask)
+        glfw_mods |= GLFW_MOD_CAPS_LOCK;
+    if (record.mods & Mod2Mask)
+        glfw_mods |= GLFW_MOD_NUM_LOCK;
+
+    return glfw_mods;
 }
 
 // Translates an X11 key code to a GLFW key token
@@ -1187,7 +1198,7 @@ static void processEvent(XEvent *event)
         case KeyPress:
         {
             const int key = translateKey(keycode);
-            const int mods = translateState(event->xkey.state);
+            const int mods = getMods(_glfw.x11.display);
             const int plain = !(mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT));
 
             if (window->x11.ic)
@@ -1259,7 +1270,7 @@ static void processEvent(XEvent *event)
         case KeyRelease:
         {
             const int key = translateKey(keycode);
-            const int mods = translateState(event->xkey.state);
+            const int mods = getMods(_glfw.x11.display);
 
             if (!_glfw.x11.xkb.detectable)
             {
@@ -1299,7 +1310,7 @@ static void processEvent(XEvent *event)
 
         case ButtonPress:
         {
-            const int mods = translateState(event->xbutton.state);
+            const int mods = getMods(_glfw.x11.display);
 
             if (event->xbutton.button == Button1)
                 _glfwInputMouseClick(window, GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, mods);
@@ -1333,7 +1344,7 @@ static void processEvent(XEvent *event)
 
         case ButtonRelease:
         {
-            const int mods = translateState(event->xbutton.state);
+            const int mods = getMods(_glfw.x11.display);
 
             if (event->xbutton.button == Button1)
             {
@@ -3264,4 +3275,3 @@ GLFWAPI const char* glfwGetX11SelectionString(void)
 
     return getSelectionString(_glfw.x11.PRIMARY);
 }
-
